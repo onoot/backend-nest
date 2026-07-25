@@ -151,17 +151,28 @@ export class CatalogService {
     const catMap = new Map<number, any>();
     for (const c of all) catMap.set(c.id, c);
 
+    const ids = products.map((p: any) => p.id);
+    const photos = await this.db.query(
+      `SELECT product_id, name FROM product_photo WHERE product_id IN (${ids.map(() => '?').join(',')}) ORDER BY sort ASC`,
+      ids,
+    );
+    const photoMap = new Map<number, string>();
+    for (const ph of photos) {
+      if (!photoMap.has(ph.product_id)) photoMap.set(ph.product_id, ph.name);
+    }
+
     return products.map((p: any) => {
-      let photo: string | null = null;
+      const ownPhoto = photoMap.get(p.id) || p.photo || null;
+      let categoryPhoto: string | null = null;
       if (p.category_id) {
         let current = catMap.get(p.category_id);
         while (current) {
-          if (current.photo) { photo = current.photo; break; }
+          if (current.photo) { categoryPhoto = current.photo; break; }
           if (!current.parent_id || current.parent_id === 0) break;
           current = catMap.get(current.parent_id);
         }
       }
-      return { ...p, categoryPhoto: photo };
+      return { ...p, ownPhoto, categoryPhoto };
     });
   }
 
