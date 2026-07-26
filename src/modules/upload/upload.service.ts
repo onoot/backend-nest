@@ -1,7 +1,12 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
 import * as path from 'path';
+import * as sharp from 'sharp';
 import { MinioService } from '../minio/minio.service';
+
+const COMPRESS_EXT = /\.(jpg|jpeg|png|webp)$/i;
+const MAX_WIDTH = 1200;
+const JPEG_QUALITY = 70;
 
 @Injectable()
 export class UploadService {
@@ -39,8 +44,25 @@ export class UploadService {
       cleanPath = found;
     }
 
-    const stream = await this.minio.getStream(cleanPath);
+    const buffer = await this.minio.download(cleanPath);
     const ext = path.extname(cleanPath).toLowerCase();
+
+    if (COMPRESS_EXT.test(ext)) {
+      try {
+        const compressed = await sharp(buffer)
+          .resize({ width: MAX_WIDTH, withoutEnlargement: true })
+          .jpeg({ quality: JPEG_QUALITY, progressive: true })
+          .toBuffer();
+        return {
+          stream: new (require('stream').PassThrough)().end(compressed) as unknown as NodeJS.ReadableStream,
+          contentType: 'image/jpeg',
+        };
+      } catch {
+        // fall through to raw stream on sharp failure
+      }
+    }
+
+    const stream = await this.minio.getStream(cleanPath);
     const mime: Record<string, string> = { '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpeg': 'image/jpeg', '.jpg': 'image/jpeg' };
     return { stream, contentType: mime[ext] || 'image/jpeg' };
   }
