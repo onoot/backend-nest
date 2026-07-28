@@ -5,7 +5,6 @@ import * as sharp from 'sharp';
 import { MinioService } from '../minio/minio.service';
 
 const COMPRESS_EXT = /\.(jpg|jpeg|png|webp)$/i;
-const MAX_WIDTH = 1200;
 const JPEG_QUALITY = 70;
 
 @Injectable()
@@ -50,7 +49,6 @@ export class UploadService {
     if (COMPRESS_EXT.test(ext)) {
       try {
         const compressed = await sharp(buffer)
-          .resize({ width: MAX_WIDTH, withoutEnlargement: true })
           .jpeg({ quality: JPEG_QUALITY, progressive: true })
           .toBuffer();
         return {
