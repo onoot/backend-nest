@@ -264,6 +264,7 @@ export class CatalogService {
     const product = await this.db.getOne('SELECT p.*, pc.name as categoryName FROM product p LEFT JOIN product_category pc ON p.category_id = pc.id WHERE p.id = ?', [id]);
     if (!product) throw new NotFoundException('Product not found');
     const photos = await this.db.query('SELECT * FROM product_photo WHERE product_id = ? ORDER BY sort ASC', [id]);
+    if (!product.photo && photos.length > 0) product.photo = photos[0].name;
     const documents = await this.db.query('SELECT * FROM document WHERE product_id = ? AND visible = 1 ORDER BY sort ASC', [id]);
     const categoryPhoto = product.category_id ? await this.resolveCategoryPhoto(product.category_id) : null;
 
