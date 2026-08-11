@@ -162,34 +162,49 @@ export class CatalogService {
     return null;
   }
 
-  private async attachCategoryPhotos(products: any[]): Promise<any[]> {
-    if (products.length === 0) return products;
-    const all = await this.db.query('SELECT id, photo, parent_id FROM product_category');
-    const catMap = new Map<number, any>();
-    for (const c of all) catMap.set(c.id, c);
-
-    const ids = products.map((p: any) => p.id);
-    const photos = await this.db.query(
-      `SELECT product_id, name FROM product_photo WHERE product_id IN (${ids.map(() => '?').join(',')}) ORDER BY sort ASC`,
-      ids,
-    );
-    const photoMap = new Map<number, string>();
-    for (const ph of photos) {
-      if (!photoMap.has(ph.product_id)) photoMap.set(ph.product_id, ph.name);
+  private resolveNearestCategoryName(catMap: Map<number, any>, categoryId: number | null): string | null {
+    if (!categoryId) return null;
+    let current = catMap.get(categoryId);
+    while (current) {
+      if (current.name && current.name.trim().length > 0) return current.name;
+      if (!current.parent_id || current.parent_id === 0) break;
+      current = catMap.get(current.parent_id);
     }
+    return null;
+  }
 
-    return products.map((p: any) => {
-      const ownPhoto = photoMap.get(p.id) || p.photo || null;
-      let categoryPhoto: string | null = null;
-      if (p.category_id) {
-        let current = catMap.get(p.category_id);
-        while (current) {
-          if (current.photo) { categoryPhoto = current.photo; break; }
-          if (!current.parent_id || current.parent_id === 0) break;
-          current = catMap.get(current.parent_id);
+  private attachCategoryPhotos(products: any[]): Promise<any[]> {
+    if (products.length === 0) return Promise.resolve(products);
+    return this.db.query('SELECT id, photo, parent_id, name FROM product_category').then((all) => {
+      const catMap = new Map<number, any>();
+      for (const c of all) catMap.set(c.id, c);
+
+      const ids = products.map((p: any) => p.id);
+      return this.db.query(
+        `SELECT product_id, name FROM product_photo WHERE product_id IN (${ids.map(() => '?').join(',')}) ORDER BY sort ASC`,
+        ids,
+      ).then((photos) => {
+        const photoMap = new Map<number, string>();
+        for (const ph of photos) {
+          if (!photoMap.has(ph.product_id)) photoMap.set(ph.product_id, ph.name);
         }
-      }
-      return { ...p, ownPhoto, categoryPhoto };
+
+        return products.map((p: any) => {
+          const ownPhoto = photoMap.get(p.id) || p.photo || null;
+          let categoryPhoto: string | null = null;
+          if (p.category_id) {
+            let current = catMap.get(p.category_id);
+            while (current) {
+              if (current.photo) { categoryPhoto = current.photo; break; }
+              if (!current.parent_id || current.parent_id === 0) break;
+              current = catMap.get(current.parent_id);
+            }
+          }
+          const hasOwnName = p.name && p.name.trim().length > 0;
+          const displayName = hasOwnName ? p.name : this.resolveNearestCategoryName(catMap, p.category_id);
+          return { ...p, ownPhoto, categoryPhoto, displayName };
+        });
+      });
     });
   }
 
@@ -295,6 +310,9 @@ export class CatalogService {
     if (!product.photo && photos.length > 0) product.photo = photos[0].name;
     const documents = await this.db.query('SELECT * FROM document WHERE product_id = ? AND visible = 1 ORDER BY sort ASC', [id]);
     const categoryPhoto = product.category_id ? await this.resolveCategoryPhoto(product.category_id) : null;
+    const displayName = product.name && product.name.trim().length > 0
+      ? product.name
+      : await this.resolveProductDisplayName(product.category_id);
 
     let productProps: Record<string, string> | null = null;
     if (product.properties) {
@@ -315,7 +333,15 @@ export class CatalogService {
       }
     }
 
-    return { ...product, categoryPhoto, photos, documents, properties: productProps, categoryProperties: categoryProps, excludedProperties: excludedProps };
+    return { ...product, categoryPhoto, displayName, photos, documents, properties: productProps, categoryProperties: categoryProps, excludedProperties: excludedProps };
+  }
+
+  private async resolveProductDisplayName(categoryId: number | null): Promise<string | null> {
+    if (!categoryId) return null;
+    const all = await this.db.query('SELECT id, name, parent_id FROM product_category');
+    const catMap = new Map<number, any>();
+    for (const c of all) catMap.set(c.id, c);
+    return this.resolveNearestCategoryName(catMap, categoryId);
   }
 
   private mapProductData(data: any) {
