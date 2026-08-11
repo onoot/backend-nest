@@ -23,6 +23,15 @@ export class CatalogService {
     });
   }
 
+  private async hasUncategorizedVisible(): Promise<boolean> {
+    const row = await this.db.getOne<{ c: number }>('SELECT COUNT(*) as c FROM product WHERE category_id IS NULL AND visible = 1');
+    return (row?.c ?? 0) > 0;
+  }
+
+  private virtualMiscCategory(): any {
+    return { id: 0, name: 'Прочее', photo: null, parent_id: 0, sort: 999999, visible: 1, properties: null, children: [] };
+  }
+
   async getCategories(parentId?: number) {
     let sql = 'SELECT * FROM product_category WHERE visible = 1';
     const params: any[] = [];
@@ -31,7 +40,11 @@ export class CatalogService {
       params.push(parentId);
     }
     sql += ' ORDER BY sort ASC';
-    return this.attachCategoryParentPhotos(await this.db.query(sql, params));
+    const cats = await this.attachCategoryParentPhotos(await this.db.query(sql, params));
+    if (parentId === undefined && await this.hasUncategorizedVisible()) {
+      cats.push({ ...this.virtualMiscCategory(), parent_photo: null });
+    }
+    return cats;
   }
 
   async getAllCategories(page?: number, limit = 20) {
@@ -61,7 +74,11 @@ export class CatalogService {
         try { c.properties = JSON.parse(c.properties); } catch { c.properties = null; }
       }
     }
-    return this.buildTree(all);
+    const tree = this.buildTree(all);
+    if (await this.hasUncategorizedVisible()) {
+      tree.push(this.virtualMiscCategory());
+    }
+    return tree;
   }
 
   private buildTree(items: any[], parentId: number | null = null): any[] {
@@ -179,22 +196,26 @@ export class CatalogService {
   async getProducts(categoryId?: number, page = 1, limit = 12, search?: string) {
     let innerWhere = 'WHERE p2.visible = 1';
     const innerParams: any[] = [];
-    if (categoryId) {
-      const ids = await this.getChildCategoryIds(categoryId);
-      if (ids.length === 1) {
-        innerWhere += ' AND p2.category_id = ?';
-        innerParams.push(categoryId);
+    if (categoryId !== undefined) {
+      if (categoryId === 0) {
+        innerWhere += ' AND p2.category_id IS NULL';
       } else {
-        innerWhere += ` AND p2.category_id IN (${ids.map(() => '?').join(',')})`;
-        innerParams.push(...ids);
+        const ids = await this.getChildCategoryIds(categoryId);
+        if (ids.length === 1) {
+          innerWhere += ' AND p2.category_id = ?';
+          innerParams.push(categoryId);
+        } else {
+          innerWhere += ` AND p2.category_id IN (${ids.map(() => '?').join(',')})`;
+          innerParams.push(...ids);
+        }
       }
     }
     if (search) {
-      innerWhere += ' AND (p2.sku LIKE ? OR pc2.name LIKE ? OR p2.properties LIKE ?)';
-      innerParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      innerWhere += ' AND (p2.sku LIKE ? OR p2.name LIKE ? OR pc2.name LIKE ? OR p2.properties LIKE ?)';
+      innerParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
-    const dedupSub = `(SELECT MIN(p2.id) as id FROM product p2 LEFT JOIN product_category pc2 ON p2.category_id = pc2.id ${innerWhere} GROUP BY p2.category_id)`;
+    const dedupSub = `(SELECT MIN(p2.id) as id FROM product p2 LEFT JOIN product_category pc2 ON p2.category_id = pc2.id ${innerWhere} GROUP BY COALESCE(p2.category_id, p2.id))`;
 
     const countResult = await this.db.getOne<{ total: number }>(
       `SELECT COUNT(*) as total FROM ${dedupSub} as dedup`, innerParams,
@@ -236,7 +257,10 @@ export class CatalogService {
   async getAllProducts(categoryId?: number, page?: number, limit = 20) {
     let where = '';
     const params: any[] = [];
-    if (categoryId) { where = 'WHERE p.category_id = ?'; params.push(categoryId); }
+    if (categoryId !== undefined) {
+      where = categoryId === 0 ? 'WHERE p.category_id IS NULL' : 'WHERE p.category_id = ?';
+      if (categoryId !== 0) params.push(categoryId);
+    }
 
     if (page) {
       const countResult = await this.db.getOne<{ total: number }>(
@@ -252,8 +276,12 @@ export class CatalogService {
     }
 
     let items: any[];
-    if (categoryId) {
-      items = await this.db.query('SELECT p.*, pc.name as categoryName FROM product p LEFT JOIN product_category pc ON p.category_id = pc.id WHERE p.category_id = ? ORDER BY p.sort ASC', [categoryId]);
+    if (categoryId !== undefined) {
+      if (categoryId === 0) {
+        items = await this.db.query('SELECT p.*, pc.name as categoryName FROM product p LEFT JOIN product_category pc ON p.category_id = pc.id WHERE p.category_id IS NULL ORDER BY p.sort ASC');
+      } else {
+        items = await this.db.query('SELECT p.*, pc.name as categoryName FROM product p LEFT JOIN product_category pc ON p.category_id = pc.id WHERE p.category_id = ? ORDER BY p.sort ASC', [categoryId]);
+      }
     } else {
       items = await this.db.query('SELECT p.*, pc.name as categoryName FROM product p LEFT JOIN product_category pc ON p.category_id = pc.id ORDER BY p.sort ASC');
     }
