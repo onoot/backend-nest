@@ -25,11 +25,12 @@ export class CatalogController {
     @Query('categoryId') categoryId?: string,
     @Query('page') page?: string,
     @Query('search') search?: string,
+    @Query('limit') limit?: string,
   ) {
     return this.service.getProducts(
       categoryId ? Number(categoryId) : undefined,
       Number(page) || 1,
-      12,
+      limit ? Math.min(Number(limit) || 12, 500) : 12,
       search,
     );
   }

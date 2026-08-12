@@ -245,6 +245,9 @@ export class CatalogService {
 
     const withPhotos = await this.attachCategoryPhotos(items);
     for (const p of withPhotos) {
+      if (p.properties && typeof p.properties === 'string') {
+        try { p.properties = JSON.parse(p.properties); } catch { p.properties = null; }
+      }
       const ownPhotos = await this.db.query('SELECT name FROM product_photo WHERE product_id = ? ORDER BY sort ASC', [p.id]);
       p.ownPhotos = ownPhotos.map((ph: any) => ph.name);
       p.mainPhoto = ownPhotos.length > 0 ? ownPhotos[0].name : p.categoryPhoto;
