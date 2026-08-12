@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Req, Res, UseGuards, UseInterceptors, UploadedFile, Body } from '@nestjs/common';
+import { Controller, Post, Get, Param, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile, Body } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { UploadService } from './upload.service';
@@ -32,9 +32,10 @@ export class UploadController {
 
   @Public()
   @Get('uploads/*path')
-  async serveFile(@Param('path') path: string, @Req() req, @Res() res: Response) {
+  async serveFile(@Param('path') path: string, @Query('type') type: string | undefined, @Req() req, @Res() res: Response) {
     const actualPath = Array.isArray(req.params.path) ? req.params.path.join('/') : req.params.path;
-    const { stream, contentType } = await this.service.getPhoto(actualPath);
+    const mode = type === 'thumb' || type === 'full' ? type : undefined;
+    const { stream, contentType } = await this.service.getPhoto(actualPath, mode);
     res.set({ 'Content-Type': contentType });
     stream.pipe(res);
   }
