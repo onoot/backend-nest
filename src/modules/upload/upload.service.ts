@@ -5,9 +5,8 @@ import * as sharp from 'sharp';
 import { MinioService } from '../minio/minio.service';
 
 const COMPRESS_EXT = /\.(jpg|jpeg|png|webp)$/i;
-const JPEG_QUALITY = 70;
-const THUMB_WIDTH = 64;
-const THUMB_QUALITY = 55;
+const JPEG_QUALITY = 85;
+const MAX_WIDTH = 2560;
 const MIME: Record<string, string> = { '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.jpeg': 'image/jpeg', '.jpg': 'image/jpeg' };
 
 @Injectable()
@@ -37,7 +36,7 @@ export class UploadService {
     return files.filter(f => imageExt.test(f)).sort();
   }
 
-  async getPhoto(filename: string, mode?: 'thumb' | 'full'): Promise<{ stream: NodeJS.ReadableStream; contentType: string }> {
+  async getPhoto(filename: string, options: { type?: 'full'; width?: number } = {}): Promise<{ stream: NodeJS.ReadableStream; contentType: string }> {
     let cleanPath = filename.replace(/^\//, '');
     let exists = await this.minio.exists(cleanPath);
     if (!exists) {
@@ -50,36 +49,19 @@ export class UploadService {
     const pass = (data: Buffer) => new (require('stream').PassThrough)().end(data) as unknown as NodeJS.ReadableStream;
 
     // Full quality: original file, no recompression (lossless).
-    if (mode === 'full') {
+    if (options.type === 'full') {
       const stream = await this.minio.getStream(cleanPath);
       return { stream, contentType: MIME[ext] || 'image/jpeg' };
     }
 
-    // Lightweight preview: tiny progressive JPEG.
-    if (mode === 'thumb' && COMPRESS_EXT.test(ext)) {
-      const buffer = await this.minio.download(cleanPath);
-      try {
-        const thumb = await sharp(buffer)
-          .rotate()
-          .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
-          .jpeg({ quality: THUMB_QUALITY, progressive: true })
-          .toBuffer();
-        return { stream: pass(thumb), contentType: 'image/jpeg' };
-      } catch {
-        // fall through to raw stream on sharp failure
-      }
-    }
-
+    // Responsive resizing: ?w=width (browser picks one size via srcset → single request).
     if (COMPRESS_EXT.test(ext)) {
       try {
-        const compressed = await sharp(await this.minio.download(cleanPath))
-          .rotate()
-          .jpeg({ quality: JPEG_QUALITY, progressive: true })
-          .toBuffer();
-        return {
-          stream: pass(compressed),
-          contentType: 'image/jpeg',
-        };
+        const width = options.width ? Math.min(Math.max(1, Math.round(options.width)), MAX_WIDTH) : undefined;
+        let pipeline = sharp(await this.minio.download(cleanPath)).rotate();
+        if (width) pipeline = pipeline.resize({ width, withoutEnlargement: true });
+        const out = await pipeline.jpeg({ quality: JPEG_QUALITY, progressive: true }).toBuffer();
+        return { stream: pass(out), contentType: 'image/jpeg' };
       } catch {
         // fall through to raw stream on sharp failure
       }

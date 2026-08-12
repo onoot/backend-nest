@@ -32,10 +32,12 @@ export class UploadController {
 
   @Public()
   @Get('uploads/*path')
-  async serveFile(@Param('path') path: string, @Query('type') type: string | undefined, @Req() req, @Res() res: Response) {
+  async serveFile(@Param('path') path: string, @Query('type') type: string | undefined, @Query('w') width: string | undefined, @Req() req, @Res() res: Response) {
     const actualPath = Array.isArray(req.params.path) ? req.params.path.join('/') : req.params.path;
-    const mode = type === 'thumb' || type === 'full' ? type : undefined;
-    const { stream, contentType } = await this.service.getPhoto(actualPath, mode);
+    const { stream, contentType } = await this.service.getPhoto(actualPath, {
+      type: type === 'full' ? 'full' : undefined,
+      width: width ? Number(width) : undefined,
+    });
     res.set({ 'Content-Type': contentType });
     stream.pipe(res);
   }
