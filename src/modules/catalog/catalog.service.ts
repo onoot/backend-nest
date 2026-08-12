@@ -248,12 +248,29 @@ export class CatalogService {
       if (p.properties && typeof p.properties === 'string') {
         try { p.properties = JSON.parse(p.properties); } catch { p.properties = null; }
       }
-      const ownPhotos = await this.db.query('SELECT name FROM product_photo WHERE product_id = ? ORDER BY sort ASC', [p.id]);
-      p.ownPhotos = ownPhotos.map((ph: any) => ph.name);
-      p.mainPhoto = ownPhotos.length > 0 ? ownPhotos[0].name : p.categoryPhoto;
+    }
+
+    const allPhotos = await this.getPhotosForProducts(withPhotos.map((p: any) => p.id));
+    const photosByProduct = new Map<number, string[]>();
+    for (const ph of allPhotos) {
+      if (!photosByProduct.has(ph.product_id)) photosByProduct.set(ph.product_id, []);
+      photosByProduct.get(ph.product_id)!.push(ph.name);
+    }
+    for (const p of withPhotos) {
+      const ownPhotos = photosByProduct.get(p.id) || [];
+      p.ownPhotos = ownPhotos;
+      p.mainPhoto = ownPhotos.length > 0 ? ownPhotos[0] : p.categoryPhoto;
     }
 
     return { items: withPhotos, total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  private async getPhotosForProducts(productIds: number[]): Promise<any[]> {
+    if (productIds.length === 0) return [];
+    return this.db.query(
+      `SELECT product_id, name FROM product_photo WHERE product_id IN (${productIds.map(() => '?').join(',')}) ORDER BY sort ASC`,
+      productIds,
+    );
   }
 
   private async getChildCategoryIds(parentId: number): Promise<number[]> {
